@@ -1,0 +1,175 @@
+diff --git a/src/cocoa_joystick.m b/src/cocoa_joystick.m
+index 3a526ebf..c4ecfe4b 100644
+--- a/src/cocoa_joystick.m
++++ b/src/cocoa_joystick.m
+@@ -42,6 +42,7 @@
+ 
+ // Joystick element information
+ //
++
+ typedef struct _GLFWjoyelementNS
+ {
+     IOHIDElementRef native;
+@@ -53,6 +54,125 @@
+ } _GLFWjoyelementNS;
+ 
+ 
++// -------------------------------------------------------------------------
++// DualSense Bluetooth workaround for macOS
++//
++// Some macOS versions expose the DualSense through IOHID but
++// IOHIDDeviceGetValue() stops updating while raw Bluetooth reports continue
++// to arrive.  For Sony VID 054c / PID 0ce6 we decode report 0x31 directly.
++// -------------------------------------------------------------------------
++
++typedef struct _GLFWDualSenseRawNS
++{
++    _GLFWjoystick* js;
++    uint8_t report[78];
++    CFIndex length;
++} _GLFWDualSenseRawNS;
++
++static _GLFWDualSenseRawNS dualsenseRaw = {0};
++
++static float dualsenseAxis(uint8_t value)
++{
++    return ((float) value / 127.5f) - 1.0f;
++}
++
++static void dualsenseReportCallback(void* context,
++                                    IOReturn result,
++                                    void* sender,
++                                    IOHIDReportType type,
++                                    uint32_t reportID,
++                                    uint8_t* report,
++                                    CFIndex length)
++{
++    _GLFWjoystick* js = (_GLFWjoystick*) context;
++
++    if (!js || !js->connected)
++        return;
++
++    // Enhanced Bluetooth report
++    if (reportID != 0x31 || length < 12)
++        return;
++
++    // IOHID callback buffer begins with report ID.
++    // Byte 1 is Bluetooth sequence/header.
++    const uint8_t* s = report + 2;
++
++    const uint8_t lx = s[0];
++    const uint8_t ly = s[1];
++    const uint8_t rx = s[2];
++    const uint8_t ry = s[3];
++    const uint8_t l2 = s[4];
++    const uint8_t r2 = s[5];
++
++    const uint8_t b0 = s[7];
++    const uint8_t b1 = s[8];
++    const uint8_t b2 = s[9];
++
++    // Native axis ordering expected by GLFW's macOS DualSense mapping:
++    // a0 LX, a1 LY, a2 RX, a3 L2, a4 R2, a5 RY
++    _glfwInputJoystickAxis(js, 0, dualsenseAxis(lx));
++    _glfwInputJoystickAxis(js, 1, dualsenseAxis(ly));
++    _glfwInputJoystickAxis(js, 2, dualsenseAxis(rx));
++    _glfwInputJoystickAxis(js, 3, dualsenseAxis(l2));
++    _glfwInputJoystickAxis(js, 4, dualsenseAxis(r2));
++    _glfwInputJoystickAxis(js, 5, dualsenseAxis(ry));
++
++    // Native button ordering used by the existing DualSense mapping:
++    // 0 Square, 1 Cross, 2 Circle, 3 Triangle
++    // 4 L1, 5 R1
++    // 8 Create, 9 Options, 10 L3, 11 R3
++    // 12 PS, 13 Touchpad, 14 Mute
++    _glfwInputJoystickButton(js, 0, (b0 & 0x10) ? GLFW_PRESS : GLFW_RELEASE);
++    _glfwInputJoystickButton(js, 1, (b0 & 0x20) ? GLFW_PRESS : GLFW_RELEASE);
++    _glfwInputJoystickButton(js, 2, (b0 & 0x40) ? GLFW_PRESS : GLFW_RELEASE);
++    _glfwInputJoystickButton(js, 3, (b0 & 0x80) ? GLFW_PRESS : GLFW_RELEASE);
++
++    _glfwInputJoystickButton(js, 4, (b1 & 0x01) ? GLFW_PRESS : GLFW_RELEASE);
++    _glfwInputJoystickButton(js, 5, (b1 & 0x02) ? GLFW_PRESS : GLFW_RELEASE);
++
++    // Trigger digital buttons, if GLFW exposed them
++    if (js->buttonCount > 6)
++        _glfwInputJoystickButton(js, 6, (b1 & 0x04) ? GLFW_PRESS : GLFW_RELEASE);
++    if (js->buttonCount > 7)
++        _glfwInputJoystickButton(js, 7, (b1 & 0x08) ? GLFW_PRESS : GLFW_RELEASE);
++
++    if (js->buttonCount > 8)
++        _glfwInputJoystickButton(js, 8, (b1 & 0x10) ? GLFW_PRESS : GLFW_RELEASE);
++    if (js->buttonCount > 9)
++        _glfwInputJoystickButton(js, 9, (b1 & 0x20) ? GLFW_PRESS : GLFW_RELEASE);
++    if (js->buttonCount > 10)
++        _glfwInputJoystickButton(js, 10, (b1 & 0x40) ? GLFW_PRESS : GLFW_RELEASE);
++    if (js->buttonCount > 11)
++        _glfwInputJoystickButton(js, 11, (b1 & 0x80) ? GLFW_PRESS : GLFW_RELEASE);
++    if (js->buttonCount > 12)
++        _glfwInputJoystickButton(js, 12, (b2 & 0x01) ? GLFW_PRESS : GLFW_RELEASE);
++    if (js->buttonCount > 13)
++        _glfwInputJoystickButton(js, 13, (b2 & 0x02) ? GLFW_PRESS : GLFW_RELEASE);
++    if (js->buttonCount > 14)
++        _glfwInputJoystickButton(js, 14, (b2 & 0x04) ? GLFW_PRESS : GLFW_RELEASE);
++
++    // D-pad nibble: 0..7 directions, 8 means centered
++    const uint8_t dpad = b0 & 0x0f;
++    int hat = GLFW_HAT_CENTERED;
++
++    switch (dpad)
++    {
++        case 0: hat = GLFW_HAT_UP; break;
++        case 1: hat = GLFW_HAT_UP | GLFW_HAT_RIGHT; break;
++        case 2: hat = GLFW_HAT_RIGHT; break;
++        case 3: hat = GLFW_HAT_RIGHT | GLFW_HAT_DOWN; break;
++        case 4: hat = GLFW_HAT_DOWN; break;
++        case 5: hat = GLFW_HAT_DOWN | GLFW_HAT_LEFT; break;
++        case 6: hat = GLFW_HAT_LEFT; break;
++        case 7: hat = GLFW_HAT_LEFT | GLFW_HAT_UP; break;
++        default: hat = GLFW_HAT_CENTERED; break;
++    }
++
++    if (js->hatCount > 0)
++        _glfwInputJoystickHat(js, 0, hat);
++}
++
++
+ // Returns the value of the specified element of the specified joystick
+ //
+ static long getElementValue(_GLFWjoystick* js, _GLFWjoyelementNS* element)
+@@ -281,6 +401,20 @@ static void matchCallback(void* context,
+     js->ns.hats    = hats;
+ 
+     _glfwInputJoystick(js, GLFW_CONNECTED);
++
++    // Sony DualSense (VID 054c, PID 0ce6):
++    // consume raw Bluetooth report 0x31 instead of broken element polling.
++    if (vendor == 0x054c && product == 0x0ce6)
++    {
++        dualsenseRaw.js = js;
++
++        IOHIDDeviceRegisterInputReportCallback(
++            device,
++            dualsenseRaw.report,
++            sizeof(dualsenseRaw.report),
++            dualsenseReportCallback,
++            js);
++    }
+ }
+ 
+ // Callback for user-initiated joystick removal
+@@ -400,6 +534,15 @@ void _glfwTerminateJoysticksCocoa(void)
+ 
+ GLFWbool _glfwPollJoystickCocoa(_GLFWjoystick* js, int mode)
+ {
++    // DualSense Bluetooth workaround:
++    // state is already updated by the raw 0x31 report callback.
++    // Do NOT overwrite it with the broken IOHIDDeviceGetValue polling.
++    if (js == dualsenseRaw.js)
++    {
++        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, false);
++        return js->connected;
++    }
++
+     if (mode & _GLFW_POLL_AXES)
+     {
+         for (CFIndex i = 0;  i < CFArrayGetCount(js->ns.axes);  i++)
