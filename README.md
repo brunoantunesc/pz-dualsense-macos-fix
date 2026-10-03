@@ -2,6 +2,20 @@
 
 A workaround for a macOS / GLFW issue where a PlayStation 5 DualSense controller connected over Bluetooth is detected by Project Zomboid, but no buttons or analog sticks respond.
 
+## Does this match your problem?
+
+This fix may help if you searched for:
+
+- Project Zomboid controller detected but not working on Mac
+- DualSense detected but no input in Project Zomboid
+- PS5 controller not responding in Project Zomboid on macOS
+- Project Zomboid Test Controller shows PS5 Controller but buttons do nothing
+- DualSense Bluetooth works in Steam but not Project Zomboid
+- GLFW detects DualSense but glfwGetJoystickButtons / glfwGetJoystickAxes do not update on macOS
+- Project Zomboid controller suddenly stopped working during gameplay
+
+In the confirmed case behind this project, the controller worked normally and then stopped responding in the middle of a Project Zomboid session. macOS and Steam continued receiving the controller normally.
+
 ## Symptoms
 
 This fix is intended for cases where:
